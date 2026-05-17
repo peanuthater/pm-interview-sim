@@ -27,8 +27,7 @@ const ROUND_RUBRICS: Record<RoundType, string> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const { questionText, userAnswer, round, candidateName, targetRole } =
-      await req.json();
+    const { questionText, userAnswer, round, jdText } = await req.json();
 
     if (!questionText || !userAnswer || !round) {
       return NextResponse.json(
@@ -38,11 +37,12 @@ export async function POST(req: NextRequest) {
     }
 
     const rubric = ROUND_RUBRICS[round as RoundType];
+    const jdSnippet = jdText ? `\n\nJob context (use to calibrate expectations):\n${String(jdText).slice(0, 800)}` : "";
 
     const response = await client.messages.create({
       model: "claude-opus-4-6",
       max_tokens: 1000,
-      system: `You are an expert PM interviewer evaluating candidates for ${targetRole} roles. Candidate: ${candidateName}.
+      system: `You are an expert PM interviewer evaluating candidates against a specific job description.${jdSnippet}
 
 Be honest, specific, and constructive. Do not inflate scores.`,
       messages: [

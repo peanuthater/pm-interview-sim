@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Question, Round, MistakeEntry, SessionState, RoundType } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -51,55 +51,122 @@ function ScoreRing({ score }: { score: number }) {
 
 // ─── Setup Screen ─────────────────────────────────────────────────────────────
 
-function SetupScreen({ onStart }: { onStart: (name: string, role: string, company: string) => void }) {
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [company, setCompany] = useState("");
+function SetupScreen({ onStart }: { onStart: (resumeText: string, jdText: string) => void }) {
+  const [resumeText, setResumeText] = useState("");
+  const [jdText, setJdText] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    if (file.type !== "application/pdf") {
+      setParseError("Please upload a PDF file.");
+      return;
+    }
+    setIsParsing(true);
+    setParseError("");
+    setFileName(file.name);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/parse-resume", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Parse failed");
+      setResumeText(data.text);
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Failed to parse PDF.");
+      setFileName("");
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const canStart = resumeText.trim().length > 0 && jdText.trim().length > 0;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-10">
+      <div className="w-full max-w-xl">
+        <div className="text-center mb-8">
           <div className="text-5xl mb-4">🎯</div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">PM Interview Simulator</h1>
-          <p className="text-slate-500 text-sm">AI-powered interview practice with real-time scoring</p>
+          <p className="text-slate-500 text-sm">Upload your resume and paste the JD — we'll tailor every question to you</p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-5">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+          {/* PDF Upload */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Your Name</label>
-            <input
-              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-slate-900 text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition"
-              placeholder="e.g. Alex Chen"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <label className="block text-sm font-medium text-slate-700 mb-2">Resume (PDF)</label>
+            <div
+              onClick={() => !isParsing && fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={onDrop}
+              className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 cursor-pointer transition-all ${
+                isDragging
+                  ? "border-amber-400 bg-amber-50"
+                  : resumeText
+                  ? "border-green-300 bg-green-50"
+                  : "border-slate-200 hover:border-amber-300 hover:bg-amber-50/40"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+              />
+              {isParsing ? (
+                <>
+                  <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm text-amber-600 font-medium">Parsing PDF…</span>
+                </>
+              ) : resumeText ? (
+                <>
+                  <span className="text-2xl">✅</span>
+                  <span className="text-sm font-medium text-green-700">{fileName}</span>
+                  <span className="text-xs text-slate-400">{resumeText.trim().split(/\s+/).length.toLocaleString()} words extracted · click to replace</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-2xl text-slate-300">📄</span>
+                  <span className="text-sm font-medium text-slate-600">Drag & drop your PDF here</span>
+                  <span className="text-xs text-slate-400">or click to browse</span>
+                </>
+              )}
+            </div>
+            {parseError && (
+              <p className="mt-1.5 text-xs text-red-600">{parseError}</p>
+            )}
           </div>
 
+          {/* JD textarea */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Target Role</label>
-            <input
-              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-slate-900 text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition"
-              placeholder="e.g. Senior Product Manager"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
+            <label className="block text-sm font-medium text-slate-700 mb-2">Job Description</label>
+            <textarea
+              className="w-full min-h-[180px] border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 resize-y focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition"
+              placeholder="Paste the full job description here — role, responsibilities, requirements, company info…"
+              value={jdText}
+              onChange={(e) => setJdText(e.target.value)}
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Target Company</label>
-            <input
-              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-slate-900 text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition"
-              placeholder="e.g. Stripe"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-            />
+            <div className="text-xs text-slate-400 mt-1 text-right">
+              {jdText.trim().split(/\s+/).filter(Boolean).length} words
+            </div>
           </div>
 
           <button
-            disabled={!name.trim() || !role.trim() || !company.trim()}
-            onClick={() => onStart(name.trim(), role.trim(), company.trim())}
-            className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold py-3 rounded-lg transition text-sm mt-2"
+            disabled={!canStart}
+            onClick={() => onStart(resumeText.trim(), jdText.trim())}
+            className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold py-3 rounded-lg transition text-sm"
           >
             Start Interview
           </button>
@@ -121,22 +188,24 @@ function SetupScreen({ onStart }: { onStart: (name: string, role: string, compan
 
 // ─── Loading Screen ───────────────────────────────────────────────────────────
 
-function LoadingScreen({ name, role, company }: { name: string; role: string; company: string }) {
-  const [step, setStep] = useState(0);
+function LoadingScreen() {
   const steps = [
+    "Parsing your resume…",
+    "Analyzing the job description…",
     "Searching for latest PM interview trends…",
-    `Researching ${company}'s hiring criteria…`,
     "Generating HR screening questions…",
     "Crafting behavioral scenarios…",
     "Building case study challenges…",
-    "Finalizing your interview…",
   ];
+  const [step, setStep] = useState(0);
 
-  // Advance steps visually (actual generation happens in parent)
-  if (typeof window !== "undefined") {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    // We use a simple interval here to simulate progress
-  }
+  useEffect(() => {
+    if (step < steps.length - 1) {
+      const t = setTimeout(() => setStep((s) => s + 1), 2600);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
@@ -144,22 +213,23 @@ function LoadingScreen({ name, role, company }: { name: string; role: string; co
         <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-amber-100 flex items-center justify-center">
           <div className="w-8 h-8 border-4 border-amber-600 border-t-transparent rounded-full animate-spin" />
         </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-1">Preparing your interview</h2>
-        <p className="text-slate-500 text-sm mb-8">{name} · {role} at {company}</p>
+        <h2 className="text-xl font-bold text-slate-900 mb-1">Tailoring your interview</h2>
+        <p className="text-slate-500 text-sm mb-8">Using web search to personalize every question…</p>
         <div className="space-y-2 text-left">
           {steps.map((s, i) => (
             <div
               key={i}
               className={`flex items-center gap-3 text-sm px-3 py-2 rounded-lg transition-all duration-500 ${
-                i === 0 ? "text-amber-700 bg-amber-50 font-medium" : "text-slate-400"
+                i < step ? "text-green-700 bg-green-50" :
+                i === step ? "text-amber-700 bg-amber-50 font-medium" :
+                "text-slate-400"
               }`}
             >
-              <span className="text-base">{i === 0 ? "⟳" : "○"}</span>
+              <span className="text-base">{i < step ? "✓" : i === step ? "⟳" : "○"}</span>
               {s}
             </div>
           ))}
         </div>
-        <p className="text-xs text-slate-400 mt-6">Using web search to tailor questions for you…</p>
       </div>
     </div>
   );
@@ -188,7 +258,7 @@ function RoundHub({
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Interview Dashboard</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            {state.candidateName} · {state.targetRole} at {state.targetCompany}
+            {state.jdText.split("\n")[0].slice(0, 60) || "Your Interview"}
           </p>
         </div>
         <button
@@ -338,8 +408,7 @@ function QuestionScreen({
           questionText: question.text,
           userAnswer: answer.trim(),
           round: question.round,
-          candidateName: state.candidateName,
-          targetRole: state.targetRole,
+          jdText: state.jdText,
         }),
       });
       const data: ScoredResult = await res.json();
@@ -587,7 +656,7 @@ function ResultScreen({ state, onRestart }: { state: SessionState; onRestart: ()
       <div className="pt-8 text-center mb-8">
         <div className="text-5xl mb-3">🏆</div>
         <h1 className="text-3xl font-bold text-slate-900 mb-1">Interview Complete</h1>
-        <p className="text-slate-500 text-sm">{state.candidateName} · {state.targetRole} at {state.targetCompany}</p>
+        <p className="text-slate-500 text-sm">{state.jdText.split("\n")[0].slice(0, 70) || "PM Interview"}</p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-center mb-5">
@@ -677,9 +746,8 @@ function ResultScreen({ state, onRestart }: { state: SessionState; onRestart: ()
 
 function initState(): SessionState {
   return {
-    candidateName: "",
-    targetRole: "",
-    targetCompany: "",
+    resumeText: "",
+    jdText: "",
     rounds: ROUND_CONFIG.map((r) => ({ ...r })),
     questions: [],
     mistakeNotebook: [],
@@ -696,12 +764,11 @@ export default function App() {
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
 
   // Generate all questions on session start
-  const handleStart = useCallback(async (name: string, role: string, company: string) => {
+  const handleStart = useCallback(async (resumeText: string, jdText: string) => {
     setState((s) => ({
       ...s,
-      candidateName: name,
-      targetRole: role,
-      targetCompany: company,
+      resumeText,
+      jdText,
       screen: "loading",
     }));
 
@@ -709,7 +776,7 @@ export default function App() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidateName: name, targetRole: role, targetCompany: company }),
+        body: JSON.stringify({ resumeText, jdText }),
       });
 
       if (!res.ok) throw new Error("Generation failed");
@@ -822,13 +889,7 @@ export default function App() {
     <>
       {state.screen === "setup" && <SetupScreen onStart={handleStart} />}
 
-      {state.screen === "loading" && (
-        <LoadingScreen
-          name={state.candidateName}
-          role={state.targetRole}
-          company={state.targetCompany}
-        />
-      )}
+      {state.screen === "loading" && <LoadingScreen />}
 
       {state.screen === "round_hub" && (
         <RoundHub

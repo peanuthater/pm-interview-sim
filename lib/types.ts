@@ -32,9 +32,8 @@ export interface MistakeEntry {
 }
 
 export interface SessionState {
-  candidateName: string;
-  targetRole: string;
-  targetCompany: string;
+  resumeText: string;
+  jdText: string;
   rounds: Round[];
   questions: Question[];
   mistakeNotebook: MistakeEntry[];

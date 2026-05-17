@@ -7,34 +7,39 @@ const ROUND_SPECS = {
   HR: {
     count: 5,
     instructions:
-      "Generate 5 HR screening questions. Focus on: motivation for role, career goals, salary/availability, culture fit, basic background. Keep them concise and realistic.",
+      "Generate 5 HR screening questions. Focus on: motivation for role, career goals, salary/availability, culture fit, and background alignment with the JD.",
   },
   Behavioral: {
     count: 8,
     instructions:
-      "Generate 8 behavioral interview questions using STAR-method situations. Cover: leadership, conflict resolution, prioritization, data-driven decisions, cross-functional collaboration, failure/learnings, stakeholder management, product intuition.",
+      "Generate 8 behavioral interview questions using STAR-method situations. Cover: leadership, conflict resolution, prioritization, data-driven decisions, cross-functional collaboration, failure/learnings, stakeholder management, product intuition. Reference specific experiences from the resume where relevant.",
   },
   Case: {
     count: 3,
     instructions:
-      "Generate 3 PM case study questions. Cover: product design/improvement, metrics & analytics, and go-to-market or prioritization strategy. Make them specific and challenging.",
+      "Generate 3 PM case study questions. Cover: product design/improvement, metrics & analytics, and go-to-market or prioritization strategy. Ground them in the company's domain from the JD.",
   },
 };
 
 export async function POST(req: NextRequest) {
   try {
-    const { candidateName, targetRole, targetCompany } = await req.json();
+    const { resumeText, jdText } = await req.json();
 
-    if (!candidateName || !targetRole || !targetCompany) {
+    if (!resumeText || !jdText) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing resumeText or jdText" },
         { status: 400 }
       );
     }
 
-    const context = `Candidate: ${candidateName}, Target Role: ${targetRole} at ${targetCompany}`;
+    const context = `
+CANDIDATE RESUME:
+${resumeText.slice(0, 3000)}
 
-    // Run all three round generations in parallel with web_search tool
+JOB DESCRIPTION:
+${jdText.slice(0, 2000)}
+`.trim();
+
     const roundKeys = ["HR", "Behavioral", "Case"] as const;
 
     const results = await Promise.all(
@@ -47,27 +52,29 @@ export async function POST(req: NextRequest) {
           messages: [
             {
               role: "user",
-              content: `You are a senior PM hiring manager at a top tech company. Context: ${context}.
+              content: `You are a senior PM hiring manager. You have the following candidate context:
 
-First, use web search to find the latest PM interview trends, common questions, and what ${targetCompany} specifically looks for in ${targetRole} candidates.
+${context}
+
+Use web search to find the latest PM interview trends and what this specific company (inferred from the JD) looks for in candidates.
 
 Then, ${spec.instructions}
 
-Return ONLY a JSON array of question strings, no extra text. Example format:
-["Question 1?", "Question 2?", "Question 3?"]
+Tailor each question directly to the candidate's background and the specific role/company in the JD.
 
-Generate exactly ${spec.count} questions tailored to the candidate's context.`,
+Return ONLY a JSON array of question strings, no extra text. Example:
+["Question 1?", "Question 2?"]
+
+Generate exactly ${spec.count} questions.`,
             },
           ],
         });
 
-        // Extract the final text response (after tool use)
         const textContent = response.content.find((c) => c.type === "text");
         if (!textContent || textContent.type !== "text") {
           throw new Error(`No text response for ${round} round`);
         }
 
-        // Parse the JSON array from the response
         const jsonMatch = textContent.text.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
           throw new Error(`Could not parse questions for ${round} round`);
@@ -78,7 +85,6 @@ Generate exactly ${spec.count} questions tailored to the candidate's context.`,
       })
     );
 
-    // Build question objects
     const allQuestions = results.flatMap(({ round, questions }) =>
       questions.map((text, idx) => ({
         id: `${round}-${idx}`,
