@@ -21,6 +21,28 @@ const ROUND_SPECS = {
   },
 };
 
+/** Extract and parse a JSON object from a Claude response that may include
+ *  multiple content blocks, markdown fences, and surrounding prose. */
+function extractJsonObject(content: Anthropic.ContentBlock[]): unknown {
+  // 1. Collect all text blocks (tool_use / tool_result blocks are ignored)
+  const fullText = content
+    .filter((c): c is Anthropic.TextBlock => c.type === "text")
+    .map((c) => c.text)
+    .join("\n");
+
+  // 2. Strip markdown code fences (```json ... ``` or ``` ... ```)
+  const stripped = fullText.replace(/```(?:json)?\s*/g, "").replace(/```/g, "");
+
+  // 3. Extract the outermost JSON object by brace position
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error(`No JSON object found in response. Raw text:\n${fullText.slice(0, 500)}`);
+  }
+
+  return JSON.parse(stripped.slice(start, end + 1));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { resumeText, jdText } = await req.json();
@@ -62,26 +84,20 @@ Then, ${spec.instructions}
 
 Tailor each question directly to the candidate's background and the specific role/company in the JD.
 
-Return ONLY a JSON array of question strings, no extra text. Example:
-["Question 1?", "Question 2?"]
+IMPORTANT: Respond with ONLY a valid JSON object in this exact format — no prose, no markdown fences:
+{"questions": ["Question 1?", "Question 2?", ...]}
 
 Generate exactly ${spec.count} questions.`,
             },
           ],
         });
 
-        const textContent = response.content.find((c) => c.type === "text");
-        if (!textContent || textContent.type !== "text") {
-          throw new Error(`No text response for ${round} round`);
+        const parsed = extractJsonObject(response.content) as { questions: string[] };
+        if (!Array.isArray(parsed.questions)) {
+          throw new Error(`Invalid questions format for ${round} round`);
         }
 
-        const jsonMatch = textContent.text.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) {
-          throw new Error(`Could not parse questions for ${round} round`);
-        }
-
-        const questions: string[] = JSON.parse(jsonMatch[0]);
-        return { round, questions };
+        return { round, questions: parsed.questions };
       })
     );
 
