@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-// pdf-parse is CJS-only; use require to avoid TS default-export error
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
 

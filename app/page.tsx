@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Question, Round, MistakeEntry, SessionState, RoundType } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
